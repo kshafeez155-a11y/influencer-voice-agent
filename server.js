@@ -13,7 +13,26 @@ const client = twilio(
   process.env.TWILIO_AUTH_TOKEN
 );
 
-// This route tells Twilio what to say after you answer the call
+app.get("/", (req, res) => {
+  res.send("Voice agent server is running");
+});
+
+app.get("/make-call", async (req, res) => {
+  try {
+    const call = await client.calls.create({
+      to: process.env.MY_PHONE_NUMBER,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      url: `${process.env.BASE_URL}/voice`,
+    });
+
+    console.log("Call started:", call.sid);
+    res.send("Call started. Check your phone.");
+  } catch (error) {
+    console.error("Call error:", error.message);
+    res.status(500).send("Call failed: " + error.message);
+  }
+});
+
 app.post("/voice", (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
 
@@ -22,34 +41,47 @@ app.post("/voice", (req, res) => {
       voice: "alice",
       language: "en-IN",
     },
-    "Hello, this is your influencer promotion AI assistant."
+    "Hello. This is your influencer promotion assistant. Please say something after the beep."
   );
+
+  twiml.record({
+    action: "/handle-recording",
+    method: "POST",
+    maxLength: 10,
+    playBeep: true,
+    trim: "trim-silence",
+  });
 
   res.type("text/xml");
   res.send(twiml.toString());
 });
 
-// This route starts the call to your mobile number
-app.get("/make-call", async (req, res) => {
-  try {
-    const call = await client.calls.create({
-      to: process.env.MY_PHONE_NUMBER,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      url: `${process.env.BASE_URL}/voice`,
-      method: "POST",
-    });
+app.post("/handle-recording", (req, res) => {
+  const recordingUrl = req.body.RecordingUrl;
+  const recordingDuration = req.body.RecordingDuration;
+  const callerNumber = req.body.From;
 
-    res.send(`Calling your phone now. Call SID: ${call.sid}`);
-  } catch (error) {
-    console.error(error);
-    res.status(500).send("Call failed. Check terminal error.");
-  }
-});
+  console.log("Recording received");
+  console.log("Caller:", callerNumber);
+  console.log("Recording URL:", recordingUrl);
+  console.log("Duration:", recordingDuration);
 
-app.get("/", (req, res) => {
-  res.send("Voice agent server is running");
+  const twiml = new twilio.twiml.VoiceResponse();
+
+  twiml.say(
+    {
+      voice: "alice",
+      language: "en-IN",
+    },
+    "Thank you. I received your voice recording. Goodbye."
+  );
+
+  twiml.hangup();
+
+  res.type("text/xml");
+  res.send(twiml.toString());
 });
 
 app.listen(process.env.PORT || 3000, () => {
-  console.log("Server running on port 3000");
+  console.log(`Server running on port ${process.env.PORT || 3000}`);
 });
