@@ -3,6 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const twilio = require("twilio");
 
+
 const app = express();
 
 app.use(express.urlencoded({ extended: false }));
@@ -56,7 +57,9 @@ app.post("/voice", (req, res) => {
   res.send(twiml.toString());
 });
 
-app.post("/handle-recording", (req, res) => {
+
+
+app.post("/handle-recording", async (req, res) => {
   const recordingUrl = req.body.RecordingUrl;
   const recordingDuration = req.body.RecordingDuration;
   const callerNumber = req.body.From;
@@ -65,7 +68,49 @@ app.post("/handle-recording", (req, res) => {
   console.log("Caller:", callerNumber);
   console.log("Recording URL:", recordingUrl);
   console.log("Duration:", recordingDuration);
+  try {
+  const audioUrl = recordingUrl + ".mp3";
 
+  const audioResponse = await fetch(audioUrl, {
+  headers: {
+    Authorization:
+      "Basic " +
+      Buffer.from(
+        `${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`
+      ).toString("base64"),
+  },
+});
+
+console.log("Twilio download status:", audioResponse.status);
+console.log("Twilio download OK:", audioResponse.ok);
+
+const audioBuffer = await audioResponse.arrayBuffer();
+
+const dgResponse = await fetch(
+  "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true",
+  {
+    method: "POST",
+    headers: {
+      Authorization: `Token ${process.env.DEEPGRAM_API_KEY}`,
+      "Content-Type": "audio/mpeg",
+    },
+    body: Buffer.from(audioBuffer),
+  }
+);
+
+  const result = await dgResponse.json();
+
+  if (!dgResponse.ok) {
+    console.log("Deepgram error:", result);
+  } else {
+    const transcript =
+      result.results.channels[0].alternatives[0].transcript;
+
+    console.log("User said:", transcript);
+  }
+} catch (error) {
+  console.log("Transcription failed:", error.message);
+}
   const twiml = new twilio.twiml.VoiceResponse();
 
   twiml.say(
