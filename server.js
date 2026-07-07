@@ -2,7 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const twilio = require("twilio");
-
+const OpenAI = require("openai");
 
 const app = express();
 
@@ -13,6 +13,10 @@ const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 app.get("/", (req, res) => {
   res.send("Voice agent server is running");
@@ -71,6 +75,8 @@ app.post("/handle-recording", async (req, res) => {
   try {
   const audioUrl = recordingUrl + ".mp3";
 
+  console.log("Audio URL being downloaded:", audioUrl);
+
   const audioResponse = await fetch(audioUrl, {
   headers: {
     Authorization:
@@ -107,6 +113,40 @@ const dgResponse = await fetch(
       result.results.channels[0].alternatives[0].transcript;
 
     console.log("User said:", transcript);
+
+    const aiResponse = await openai.chat.completions.create({
+  model: "gpt-4o-mini",
+  messages: [
+    {
+      role: "system",
+      content: `
+You are an influencer promotion phone assistant.
+
+Your job is to collect:
+1. Caller name
+2. Brand name
+3. Product or service
+4. Promotion type
+5. Budget
+6. Deadline
+7. Location
+8. Preferred influencer
+
+Ask only one question at a time.
+Keep replies short.
+Speak like a polite phone assistant.
+`,
+    },
+    {
+      role: "user",
+      content: transcript,
+    },
+  ],
+});
+
+const aiText = aiResponse.choices[0].message.content;
+
+console.log("AI replied:", aiText);
   }
 } catch (error) {
   console.log("Transcription failed:", error.message);
