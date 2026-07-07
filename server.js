@@ -2,22 +2,25 @@ require("dotenv").config();
 
 const express = require("express");
 const twilio = require("twilio");
-const OpenAI = require("openai");
+const fs = require("fs");
+const path = require("path");
+// const OpenAI = require("openai");
 
 const app = express();
 
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 
+app.use("/audio", express.static("public/audio"));
+
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
+// const openai = new OpenAI({
+//   apiKey: process.env.OPENAI_API_KEY,
+// });
 app.get("/", (req, res) => {
   res.send("Voice agent server is running");
 });
@@ -114,52 +117,102 @@ const dgResponse = await fetch(
 
     console.log("User said:", transcript);
 
-    const aiResponse = await openai.chat.completions.create({
-  model: "gpt-4o-mini",
-  messages: [
-    {
-      role: "system",
-      content: `
+    const ollamaResponse = await fetch("http://localhost:11434/api/chat", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    model: "llama3.2",
+    messages: [
+      {
+        role: "system",
+        content: `
 You are an influencer promotion phone assistant.
-
-Your job is to collect:
-1. Caller name
-2. Brand name
-3. Product or service
-4. Promotion type
-5. Budget
-6. Deadline
-7. Location
-8. Preferred influencer
-
 Ask only one question at a time.
 Keep replies short.
 Speak like a polite phone assistant.
+
+Your job is to collect:
+caller name, brand name, product/service, promotion type, budget, deadline, location, preferred influencer.
 `,
-    },
-    {
-      role: "user",
-      content: transcript,
-    },
-  ],
+      },
+      {
+        role: "user",
+        content: transcript,
+      },
+    ],
+    stream: false,
+  }),
 });
 
-const aiText = aiResponse.choices[0].message.content;
+const ollamaData = await ollamaResponse.json();
+const aiText = ollamaData.message.content;
 
 console.log("AI replied:", aiText);
+const elevenResponse = await fetch(
+  `https://api.elevenlabs.io/v1/text-to-speech/${process.env.ELEVENLABS_VOICE_ID}`,
+  {
+    method: "POST",
+    headers: {
+      "xi-api-key": process.env.ELEVENLABS_API_KEY,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      text: aiText,
+      model_id: "eleven_multilingual_v2",
+      voice_settings: {
+        stability: 0.5,
+        similarity_boost: 0.75,
+      },
+    }),
+  }
+);
+
+if (!elevenResponse.ok) {
+  const errorText = await elevenResponse.text();
+  console.log("ElevenLabs Error:", errorText);
+
+  const twiml = new twilio.twiml.VoiceResponse();
+  twiml.say("Sorry, I could not create the voice reply.");
+  twiml.hangup();
+
+  res.type("text/xml");
+  return res.send(twiml.toString());
+}
+
+const audioArrayBuffer = await elevenResponse.arrayBuffer();
+
+const fileName = `reply-${Date.now()}.mp3`;
+const audioDir = path.join(__dirname, "public", "audio");
+const filePath = path.join(audioDir, fileName);
+
+if (!fs.existsSync(audioDir)) {
+  fs.mkdirSync(audioDir, { recursive: true });
+}
+
+fs.writeFileSync(filePath, Buffer.from(audioArrayBuffer));
+
+const replyAudioUrl = `${process.env.BASE_URL}/audio/${fileName}`;
+
+console.log("Reply audio URL:", replyAudioUrl);
   }
 } catch (error) {
   console.log("Transcription failed:", error.message);
 }
   const twiml = new twilio.twiml.VoiceResponse();
 
+ if (typeof replyAudioUrl !== "undefined") {
+  twiml.play(replyAudioUrl);
+} else {
   twiml.say(
     {
       voice: "alice",
       language: "en-IN",
     },
-    "Thank you. I received your voice recording. Goodbye."
+    "Sorry, I could not create the voice reply."
   );
+}
 
   twiml.hangup();
 
